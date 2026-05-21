@@ -296,57 +296,118 @@ export default function MplPredictor() {
   }, [customComboHeroes, draftState]);
 
   // --- 3. EFFECTS & FIREBASE ---
+    // --- HIGH PERFORMANCE MONTE CARLO SIMULATION ENGINE (FIXED 50/50 PROBABILITY) ---
   const runSimulation = useCallback((currentState) => {
     if (!currentState || currentState.length === 0) return;
-    const iterations = 20000; let counts = {}; TEAMS.forEach((t) => (counts[t] = { upper: 0, playin: 0, playoff: 0, elim: 0 }));
-    let seed = getStateSeed(currentState); let seededRandom = mulberry32(seed); const teamIndices = {}; TEAMS.forEach((t, i) => (teamIndices[t] = i));
-    const baseMw = new Int32Array(9); const baseMl = new Int32Array(9); const baseGw = new Int32Array(9); const baseGl = new Int32Array(9); const baseH2h = Array.from({ length: 9 }, () => new Int32Array(9));
+    
+    const iterations = 20000; 
+    let counts = {}; 
+    TEAMS.forEach((t) => (counts[t] = { upper: 0, playin: 0, playoff: 0, elim: 0 }));
+    
+    const teamIndices = {}; 
+    TEAMS.forEach((t, i) => (teamIndices[t] = i));
+    
+    const baseMw = new Int32Array(9); 
+    const baseMl = new Int32Array(9); 
+    const baseGw = new Int32Array(9); 
+    const baseGl = new Int32Array(9); 
+    const baseH2h = Array.from({ length: 9 }, () => new Int32Array(9));
     const unplayed = [];
+    
+    // 1. Parsing State Awal
     for (let i = 0; i < currentState.length; i++) {
-      const m = currentState[i]; if (!TEAM_ABBR[m.t1] || !TEAM_ABBR[m.t2]) continue;
-      const t1 = teamIndices[m.t1]; const t2 = teamIndices[m.t2];
+      const m = currentState[i]; 
+      const t1Name = TEAM_ABBR[m.t1] || m.t1;
+      const t2Name = TEAM_ABBR[m.t2] || m.t2;
+      if (teamIndices[t1Name] === undefined || teamIndices[t2Name] === undefined) continue;
+      
+      const t1 = teamIndices[t1Name]; 
+      const t2 = teamIndices[t2Name];
+      
       if (m.s1 !== null && m.s2 !== null && (m.s1 === 2 || m.s2 === 2)) {
-        baseGw[t1] += m.s1; baseGl[t1] += m.s2; baseGw[t2] += m.s2; baseGl[t2] += m.s1;
-        if (m.s1 > m.s2) { baseMw[t1]++; baseMl[t2]++; baseH2h[t1][t2]++; } else if (m.s2 > m.s1) { baseMw[t2]++; baseMl[t1]++; baseH2h[t2][t1]++; }
-      } else { unplayed.push({ t1, t2, curS1: m.s1 || 0, curS2: m.s2 || 0 }); }
-    }
-    const unplayedLen = unplayed.length; const simMw = new Int32Array(9); const simGw = new Int32Array(9); const simGl = new Int32Array(9); const simH2h = new Int32Array(81); const baseH2hFlat = new Int32Array(81);
-    for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++) baseH2hFlat[i * 9 + j] = baseH2h[i][j];
-    for (let iter = 0; iter < iterations; iter++) {
-      const iterStandings = [0, 1, 2, 3, 4, 5, 6, 7, 8];
-      for (let i = 0; i < 9; i++) { simMw[i] = baseMw[i]; simGw[i] = baseGw[i]; simGl[i] = baseGl[i]; }
-      for (let i = 0; i < 81; i++) simH2h[i] = baseH2hFlat[i];
-      for (let i = 0; i < unplayedLen; i++) {
-        const m = unplayed[i]; let s1 = m.curS1; let s2 = m.curS2;
-        while (s1 < 2 && s2 < 2) { if (seededRandom() > 0.5) s1++; else s2++; }
-        simGw[m.t1] += s1; simGl[m.t1] += s2; simGw[m.t2] += s2; simGl[m.t2] += s1;
-        if (s1 > s2) { simMw[m.t1]++; simH2h[m.t1 * 9 + m.t2]++; } else { simMw[m.t2]++; simH2h[m.t2 * 9 + m.t1]++; }
+        baseGw[t1] += m.s1; baseGl[t1] += m.s2; 
+        baseGw[t2] += m.s2; baseGl[t2] += m.s1;
+        if (m.s1 > m.s2) { baseMw[t1]++; baseMl[t2]++; baseH2h[t1][t2]++; } 
+        else if (m.s2 > m.s1) { baseMw[t2]++; baseMl[t1]++; baseH2h[t2][t1]++; }
+      } else { 
+        unplayed.push({ t1, t2, curS1: m.s1 || 0, curS2: m.s2 || 0 }); 
       }
+    }
+    
+    const unplayedLen = unplayed.length; 
+    
+    // 2. Loop 20.000 Iterasi
+    for (let iter = 0; iter < iterations; iter++) {
+      const simMw = new Int32Array(baseMw);
+      const simMl = new Int32Array(baseMl);
+      const simGw = new Int32Array(baseGw);
+      const simGl = new Int32Array(baseGl);
+      const simH2h = baseH2h.map(row => new Int32Array(row));
+      
+      // Simulasi Match yang belum dimainkan
+      for (let i = 0; i < unplayedLen; i++) {
+        const m = unplayed[i]; 
+        let s1 = m.curS1; 
+        let s2 = m.curS2;
+        
+        // Peluang 50/50 murni per Game dalam BO3
+        while (s1 < 2 && s2 < 2) { 
+          if (Math.random() > 0.5) s1++; 
+          else s2++; 
+        }
+        
+        simGw[m.t1] += s1; simGl[m.t1] += s2; 
+        simGw[m.t2] += s2; simGl[m.t2] += s1;
+        
+        if (s1 > s2) { 
+          simMw[m.t1]++; simMl[m.t2]++;
+          simH2h[m.t1][m.t2]++; 
+        } else { 
+          simMw[m.t2]++; simMl[m.t1]++;
+          simH2h[m.t2][m.t1]++; 
+        }
+      }
+      
+      // 3. Sorting Klasemen Tiebreaker
+      const iterStandings = [0, 1, 2, 3, 4, 5, 6, 7, 8];
       iterStandings.sort((a, b) => {
         if (simMw[b] !== simMw[a]) return simMw[b] - simMw[a];
-        const gdA = simGw[a] - simGl[a]; const gdB = simGw[b] - simGl[b];
+        const gdA = simGw[a] - simGl[a]; 
+        const gdB = simGw[b] - simGl[b];
         if (gdB !== gdA) return gdB - gdA;
-        const h2hDiff = simH2h[b * 9 + a] - simH2h[a * 9 + b];
+        
+        const h2hDiff = simH2h[b][a] - simH2h[a][b];
         if (h2hDiff !== 0) return h2hDiff;
+        
         let gwrA = (simGw[a] + simGl[a]) > 0 ? simGw[a] / (simGw[a] + simGl[a]) : 0;
         let gwrB = (simGw[b] + simGl[b]) > 0 ? simGw[b] / (simGw[b] + simGl[b]) : 0;
         if (gwrB !== gwrA) return gwrB - gwrA;
+        
         return TEAMS[a].localeCompare(TEAMS[b]);
       });
+      
+      // 4. Mapping Probability
       for (let i = 0; i < 9; i++) {
         const teamName = TEAMS[iterStandings[i]];
-        if (i < 2) counts[teamName].upper++; if (i >= 2 && i < 6) counts[teamName].playin++;
-        if (i < 6) counts[teamName].playoff++; if (i >= 6) counts[teamName].elim++;
+        if (i < 2) counts[teamName].upper++;          // Top 2: Upper Bracket
+        if (i >= 2 && i < 6) counts[teamName].playin++; // Rank 3-6: Play-In
+        if (i < 6) counts[teamName].playoff++;        // Top 6: Playoff (Gabungan Upper + Playin)
+        if (i >= 6) counts[teamName].elim++;          // Rank 7-9: Eliminated
       }
     }
+    
+    // 5. Konversi ke Persentase
     let tempProbs = {};
-    TEAMS.forEach((t) => { tempProbs[t] = { upper: ((counts[t].upper / iterations) * 100).toFixed(2), playin: ((counts[t].playin / iterations) * 100).toFixed(2), playoff: ((counts[t].playoff / iterations) * 100).toFixed(2), elim: ((counts[t].elim / iterations) * 100).toFixed(2) }; });
+    TEAMS.forEach((t) => { 
+      tempProbs[t] = { 
+        upper: ((counts[t].upper / iterations) * 100).toFixed(1), 
+        playin: ((counts[t].playin / iterations) * 100).toFixed(1), 
+        playoff: ((counts[t].playoff / iterations) * 100).toFixed(1), 
+        elim: ((counts[t].elim / iterations) * 100).toFixed(1) 
+      }; 
+    });
     setProbs(tempProbs);
   }, []);
-
-  useEffect(() => { if (state.length > 0) { setIsCalculating(true); const timer = setTimeout(() => { runSimulation(state); setIsCalculating(false); }, 0); return () => clearTimeout(timer); } }, [state, runSimulation]);
-  useEffect(() => { setTeamLogos(FALLBACK_LOGOS); initBaseState().then(() => { setTimeout(() => { setIsAppReady(true); initFirebase(); }, 500); }); }, []);
-
   // --- 4. HANDLERS & FUNCTIONS ---
   const updateSearch = (e) => setHeroSearchQuery(e.target.value);
   const updateRoleFilter = (e) => setHeroRoleFilter(e.target.value);
