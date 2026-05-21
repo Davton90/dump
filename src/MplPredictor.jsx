@@ -351,7 +351,8 @@ const heroDetailData = useMemo(() => {
         processedHeroData={processedHeroData} 
         teamLogos={teamLogos} 
         closeHeroDetail={closeHeroDetail} 
-        setHeroDetailModal={setHeroDetailModal} 
+        setHeroDetailModal={setHeroDetailModal}
+        getHeroIcon={getHeroIcon} 
       />
     </>
   );
